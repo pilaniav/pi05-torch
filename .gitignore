@@ -1,0 +1,31 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environment (recreated by `uv sync`)
+.venv/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Build output
+build/
+dist/
+*.egg-info/
+
+# Claude Code per-user settings
+.claude/settings.local.json
+
+# Editor settings (personal)
+.vscode/
+
+# Model weights, checkpoints, datasets, training outputs (large: never in git)
+*.pt
+*.pth
+*.safetensors
+/checkpoints/
+/data/
+/runs/
+/outputs/
+/wandb/
