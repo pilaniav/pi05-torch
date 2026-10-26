@@ -14,8 +14,13 @@ class SiglipConfig:
     # "sdpa":  fused PyTorch kernel, faster and uses less memory
     attn_implementation: str = "eager"
 
+
 def get_siglip_config(variant: str) -> SiglipConfig:
     variants = {
-        "so400m": SiglipConfig()    # SigLIP So400m/14, PaliGemma's vision tower
+        "so400m": SiglipConfig(),  # SigLIP So400m/14, PaliGemma's vision tower
+        
+        "siglip_tiny": SiglipConfig(
+            image_size=28, patch_size=14, width=24, depth=2, mlp_dim=48, num_heads=4
+        ),
     }
     return variants[variant]

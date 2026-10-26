@@ -18,8 +18,24 @@ def get_gemma_config(variant: str) -> GemmaConfig:
         # Language model in Paligemma
         "gemma_2b": GemmaConfig(width=2048, depth=18, mlp_dim=16384),
         # Pi0.5 action expert
-        "gemma_300m": GemmaConfig(width=1024, depth=18, mlp_dim=4096,
-                                  vocab_size=None, use_adarms=True),
+        "gemma_300m": GemmaConfig(
+            width=1024, depth=18, mlp_dim=4096, vocab_size=None, use_adarms=True
+        ),
+        
+        # tiny models for CPU unit tests
+        "gemma_tiny": GemmaConfig(
+            width=32, depth=2, mlp_dim=64, num_heads=4, num_kv_heads=1, head_dim=8, vocab_size=100
+        ),
+        "gemma_tiny_expert": GemmaConfig(
+            width=16,
+            depth=2,
+            mlp_dim=32,
+            num_heads=4,
+            num_kv_heads=1,
+            head_dim=8,
+            vocab_size=None,
+            use_adarms=True,
+        ),
     }
     return variants[variant]
 

@@ -35,7 +35,7 @@ class PaliGemmaWithExpert(nn.Module):
 
         # Note :
         #   Precision (bf16 weights, fp32 for selected params) is applied outside 
-        #   this class, in the training/inference setup. Not done yet.
+        #   this class, in the training/inference setup. 
 
     def set_gradient_checkpointing(self, enabled: bool):
         """
