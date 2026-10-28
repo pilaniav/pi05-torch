@@ -6,6 +6,7 @@ dependencies = [
     "numpy>=2.4.6",
     "torch>=2.7.1",
     "transformers==4.53.2",
+    "tyro>=1.0.16",
 ]
 
 [dependency-groups]
