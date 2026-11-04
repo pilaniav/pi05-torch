@@ -3,8 +3,13 @@ name = "pi05-torch"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
+    "av>=14",                     # PyAV (bundled FFmpeg): decode + re-encode in prepare
     "numpy>=2.4.6",
-    "torch>=2.7.1",
+    "pillow>=13.0.0",
+    "pyarrow>=17",                # parquet
+    "safetensors>=0.8.0",
+    "torch>=2.11",
+    "torchcodec>=0.12",           # frame-exact video reads; needs system FFmpeg 4-9
     "transformers==4.53.2",
     "tyro>=1.0.16",
 ]

@@ -25,7 +25,9 @@ dist/
 *.pth
 *.safetensors
 /checkpoints/
-/data/
 /runs/
 /outputs/
 /wandb/
+/raw_data/
+/prepared_data/
+/pretrained/
