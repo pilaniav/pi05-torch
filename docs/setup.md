@@ -69,15 +69,17 @@ Sentencepiece tokenizer (PaliGemma vocabulary, manual, once):
             curl -L -o pretrained/paligemma_tokenizer.model <source>
     used:   data loader and policy server (TrainConfig.tokenizer_path)
 
-pi05_base weights (manual, once: download JAX, convert to PyTorch):
+pi05_base weights (PyTorch, from LeRobot, once):
 
-    source: gs://openpi-assets/checkpoints/pi05_base   (JAX/orbax only)
+    source: Hugging Face model lerobot/pi05_base   (float32 safetensors, Gemma license)
+            Same key names as openpi's PyTorch path (verified: all 812 tensors).
     to:     pretrained/pi05_base/model.safetensors
-    how:    openpi's examples/convert_jax_model_to_pytorch.py, in a separate env
-            (jax, orbax, flax, openpi). Pass --precision float32 (default is bf16).
-            The checkpoint path must contain "pi05", or it silently converts as pi0.
+    how:    huggingface-cli download lerobot/pi05_base --include "*.safetensors" \
+                --local-dir pretrained/pi05_base
     used:   training start (TrainConfig.pretrained_path), loaded by load_pretrained (strict)
-    alt:    LeRobot's PyTorch pi0.5 on Hugging Face (verify names/values match).
+    alt:    openpi's JAX checkpoint gs://openpi-assets/checkpoints/pi05_base, converted with
+            openpi's examples/convert_jax_model_to_pytorch.py in a separate env (jax, orbax,
+            flax, openpi). Pass --precision float32; the path must contain "pi05".
 
 Norm stats (script, no download):
 
@@ -106,8 +108,7 @@ Set up the instance:
 
 Smoke run on one GPU first:
 - load_pretrained loads the weights with no errors.
-- Real model at batch 32 / world_size: peak GPU memory (TODO: log gpu_mem_gb),
-  sec/step, compile on vs off.
+- Real model at batch 32 / world_size: peak GPU memory, sec/step, compile on vs off.
 - Overfit one batch: loss -> ~0 within a few hundred steps.
 - Save + resume a checkpoint; check disk per checkpoint (~40 GB).
 
