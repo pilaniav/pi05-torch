@@ -86,9 +86,12 @@ def save_checkpoint(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     config: TrainConfig,
+    extra_files: tuple[Path, ...] = (),
 ) -> Path:
     """
     Save to checkpoint_dir/<step>/ atomically. Pass the unwrapped model, not DDP.
+
+    extra_files (e.g. norm_stats.json) are copied in, so the checkpoint is self-contained.
     """
     final_dir = checkpoint_dir / str(step)
     tmp_dir = checkpoint_dir / f"tmp_{step}"
@@ -100,6 +103,8 @@ def save_checkpoint(
     torch.save(optimizer.state_dict(), tmp_dir / "optimizer.pt")
     metadata = {"step": step, "config": asdict(config)}
     (tmp_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, default=str))
+    for path in extra_files:
+        shutil.copyfile(path, tmp_dir / path.name)
 
     if final_dir.exists():
         shutil.rmtree(final_dir)

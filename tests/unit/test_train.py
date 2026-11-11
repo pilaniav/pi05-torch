@@ -12,7 +12,14 @@ from pi05.checkpoint import prune_checkpoints, saved_steps
 from pi05.distributed import cleanup_distributed, setup_distributed
 from pi05.fake_data import fake_batches
 from pi05.models.pi05 import Pi05
-from pi05.train import lr_at, freeze_unused_params, make_optimizer, train_step, train_loop
+from pi05.train import (
+    freeze_unused_params,
+    lr_at,
+    make_optimizer,
+    train_loop,
+    train_step,
+    validation_loss,
+)
 from pi05.train_config import TrainConfig
 
 
@@ -159,3 +166,19 @@ def test_prune_keeps_newest(tmp_path):
 
 def test_ddp_ranks_stay_in_sync(tmp_path):
     mp.spawn(_ddp_worker, args=(2, free_port(), tmp_path), nprocs=2)
+
+def test_validation_loss_is_repeatable_and_leaves_model_unchanged():
+    torch.manual_seed(0)
+    config = TrainConfig(exp_name="test", model_config=TINY, precision="float32")
+    model = Pi05(TINY)
+    actions = torch.randn(2, TINY.action_horizon, TINY.action_dim)
+    val_batches = [(make_obs(), actions, torch.randn_like(actions), torch.full((2,), 0.5))]
+    before = [p.clone() for p in model.parameters()]
+
+    first = validation_loss(model, val_batches, torch.device("cpu"), config)
+    second = validation_loss(model, val_batches, torch.device("cpu"), config)
+
+    assert first == second
+    for old, new in zip(before, model.parameters()):
+        assert torch.equal(old, new)
+    assert model.training  # back in training mode afterwards

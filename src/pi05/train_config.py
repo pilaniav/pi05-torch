@@ -8,7 +8,7 @@ from pi05.models.pi05_config import Pi05Config
 class TrainConfig:
     exp_name: str
     model_config: Pi05Config = field(default_factory=Pi05Config)
-    pretrained_path: str | None = None
+    pretrained_path: Path | None = None  # None = random init
     checkpoint_base_dir: Path = Path("checkpoints")  # parent of all runs, relative to launch dir
 
     # Optimization
@@ -32,6 +32,11 @@ class TrainConfig:
     resume: bool = False  # continue from latest checkpoint in checkpoint_dir
     keep_last_checkpoints: int = 2  # older checkpoints are deleted
     compile: bool = False  # torch.compile the model
+    dataset_dir: Path | None = None  # prepared_data/<name>; None = random fake batches
+    tokenizer_path: Path = Path("pretrained/paligemma_tokenizer.model")
+    num_workers: int = 4  # data loader worker processes per GPU
+    val_interval: int = 1000  # steps between validation losses; 0 = off
+    num_val_batches: int = 10  # fixed validation batches, built once at start
 
     @property
     def checkpoint_dir(self) -> Path:
@@ -51,7 +56,43 @@ TRAIN_CONFIGS = {
         log_interval=5,
         save_interval=10,
         precision="float32",
-    )
+    ),
+    "dev": TrainConfig(  # tiny model on real data (prepared_data/dev), CPU
+        exp_name="dev",
+        model_config=Pi05Config(
+            vision_variant="siglip_tiny_224",
+            vlm_variant="gemma_tiny_full_vocab",
+            expert_variant="gemma_tiny_expert",
+        ),
+        dataset_dir=Path("prepared_data/dev"),
+        batch_size=4,
+        num_train_steps=50,
+        decay_steps=50,
+        warmup_steps=2,  # short warmup and high LR: learning is visible within 50 steps
+        peak_lr=1e-3,
+        log_interval=5,
+        save_interval=10,
+        precision="float32",
+        num_workers=2,
+        val_interval=10,
+        num_val_batches=2,
+    ),
+    "pi05_b1k": TrainConfig(  # full pi0.5, fine-tuned on the BEHAVIOR tasks in dataset_dir
+        exp_name="pi05_b1k",
+        model_config=Pi05Config(),  # full model: so400m + gemma_2b + gemma_300m
+        pretrained_path=Path("pretrained/pi05_base/model.safetensors"),
+        dataset_dir=Path("prepared_data/behavior"),
+        batch_size=32,  # global: 4 per GPU on 8 GPUs
+        num_train_steps=50_000,  # as b1k; check the val curve, it may plateau earlier
+        decay_steps=50_000,
+        warmup_steps=1_000,
+        peak_lr=2.5e-5,
+        precision="bfloat16",
+        num_workers=4,  # per GPU
+        save_interval=1_000,
+        val_interval=1_000,
+        num_val_batches=10,
+    ),
 }
 
 

@@ -8,6 +8,7 @@ dependencies = [
     "pillow>=13.0.0",
     "pyarrow>=17",                # parquet
     "safetensors>=0.8.0",
+    "sentencepiece>=0.2.3",
     "torch>=2.11",
     "torchcodec>=0.12",           # frame-exact video reads; needs system FFmpeg 4-9
     "transformers==4.53.2",

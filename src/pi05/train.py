@@ -20,17 +20,20 @@ from pi05.checkpoint import (
     prune_checkpoints,
     save_checkpoint,
 )
+from pi05.data_pipeline.dataset import B1kDataset, make_data_loader, make_val_batches
 from pi05.distributed import DistInfo, cleanup_distributed, setup_distributed
 from pi05.fake_data import fake_batches
 from pi05.log_setup import init_logging
 from pi05.models.observation import Observation
 from pi05.models.pi05 import Pi05
 from pi05.train_config import TRAIN_CONFIGS, TrainConfig
+from pi05.data_pipeline.norm_stats import NORM_STATS_FILE
 
 
 DTYPES = {"bfloat16": torch.bfloat16, "float32": torch.float32}
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("pi05.train") 
+
 
 def lr_at(step: int, config: TrainConfig) -> float:
     """
@@ -107,6 +110,9 @@ def train_step(
 
     dtype = DTYPES[config.precision]
     enabled = dtype != torch.float32
+    # Mixed precision: autocast runs matmuls in bf16 (faster, less memory) and
+    # precision-sensitive ops (softmax, norms, loss) in fp32. The weights stay fp32,
+    # so small updates aren't rounded away. Disabled when precision is "float32".
     with torch.autocast(device_type=actions.device.type, dtype=dtype, enabled=enabled):
         loss = model(obs, actions).mean()
 
@@ -118,6 +124,31 @@ def train_step(
     return {"loss": loss.detach(), "grad_norm": grad_norm, "lr": torch.tensor(lr)}
 
 
+@torch.no_grad()
+def validation_loss(
+    model: Pi05,
+    val_batches: list[tuple[Observation, torch.Tensor, torch.Tensor, torch.Tensor]],
+    device: torch.device,
+    config: TrainConfig,
+) -> float:
+    """
+    Mean flow-matching loss on the fixed validation batches (unwrapped model, no DDP).
+    """
+    dtype = DTYPES[config.precision]
+    model.eval()
+    total = 0.0
+    for obs, actions, noise, t in val_batches:
+        # Same mixed precision as training: autocast runs matmuls in bf16 and
+        # precision-sensitive ops in fp32. Disabled when precision is "float32".
+        with torch.autocast(device_type=device.type, dtype=dtype, enabled=dtype != torch.float32):
+            losses = model(
+                obs.to(device), actions.to(device), noise=noise.to(device), t=t.to(device)
+            )   # (B, H, D): squared error, predicted vs target velocity
+        total += losses.mean().item()
+    model.train()
+    return total / len(val_batches)
+
+
 def set_seed(seed: int) -> None:
     """
     Seed Python, NumPy and torch (CPU and all GPUs).
@@ -126,11 +157,11 @@ def set_seed(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)  # also seeds every CUDA device
 
-
 def train_loop(
     config: TrainConfig,
-    data: Iterator[tuple[Observation, torch.Tensor]],
-    info: DistInfo
+    data: Iterator[tuple[Observation, torch.Tensor, torch.Tensor]],
+    info: DistInfo,
+    val_batches: list | None = None,  # rank 0 only; None = no validation
 ) -> Pi05:
     """
     Train for config.num_train_steps. data yields per-rank (obs, actions) batches.
@@ -170,11 +201,17 @@ def train_loop(
     if config.compile:
         ddp_model = torch.compile(ddp_model)
 
+    checkpoint_extras = ()
+    if config.dataset_dir is not None:
+        checkpoint_extras = (config.dataset_dir / NORM_STATS_FILE,)  # needed at inference
+
     loss_sum = torch.tensor(0.0, device=info.device)
     interval_start = time.time()
 
     for step in range(start_step, config.num_train_steps):
-        obs, actions = next(data)
+        # action_mask is not used: like openpi, steps past an episode's end are trained on
+        # as "hold the final pose" (the last action repeated).
+        obs, actions, _action_mask = next(data)
         obs, actions = obs.to(info.device), actions.to(info.device)
         metrics = train_step(ddp_model, obs, actions, optimizer, step, config)
         loss_sum += metrics["loss"]
@@ -198,8 +235,14 @@ def train_loop(
             loss_sum.zero_()
             interval_start = time.time()
 
+        if val_batches and config.val_interval > 0 and done % config.val_interval == 0:
+            val_loss = validation_loss(model, val_batches, info.device, config)
+            logger.info("step %d  val_loss %.4f", done, val_loss)
+
         if info.is_main and (done % config.save_interval == 0 or done == config.num_train_steps):
-            save_checkpoint(config.checkpoint_dir, done, model, optimizer, config)
+            save_checkpoint(
+                config.checkpoint_dir, done, model, optimizer, config, checkpoint_extras
+            )
             prune_checkpoints(config.checkpoint_dir, config.keep_last_checkpoints)
 
     if info.world_size > 1:
@@ -225,10 +268,44 @@ def main() -> None:
             f"batch_size {config.batch_size} not divisible by {info.world_size} ranks"
         )
     batch_size = config.batch_size // info.world_size
-    data = fake_batches(config.model_config, batch_size, seed=config.seed + info.rank)
+
+    val_batches = None
+    if config.dataset_dir is None:
+        data = fake_batches(config.model_config, batch_size, seed=config.seed + info.rank)
+    else:
+        model_config = config.model_config
+        dataset = B1kDataset(
+            config.dataset_dir,
+            split="train",
+            tokenizer_path=config.tokenizer_path,
+            augment=True,
+            action_horizon=model_config.action_horizon,
+            action_dim=model_config.action_dim,
+            max_token_len=model_config.max_token_len,
+        )
+        data = make_data_loader(
+            dataset, batch_size, info, config.num_workers, seed=config.seed
+        )
+
+        if info.is_main and config.val_interval > 0:
+            val_dataset = B1kDataset(
+                config.dataset_dir,
+                split="val",
+                tokenizer_path=config.tokenizer_path,
+                augment=False,
+                action_horizon=model_config.action_horizon,
+                action_dim=model_config.action_dim,
+                max_token_len=model_config.max_token_len,
+            )
+            val_batches = make_val_batches(
+                val_dataset, config.num_val_batches, batch_size, seed=config.seed
+            )
+
     try:
-        train_loop(config, data, info)
+        train_loop(config, data, info, val_batches)
     finally:
+        if hasattr(data, "close"):
+            data.close()  # stop data loader workers before the process exits
         cleanup_distributed()  # runs even if training raises
 
 

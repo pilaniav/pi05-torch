@@ -36,6 +36,11 @@ def get_gemma_config(variant: str) -> GemmaConfig:
             vocab_size=None,
             use_adarms=True,
         ),
+        # tiny, but real tokenizer ids fit (dev runs)
+        "gemma_tiny_full_vocab": GemmaConfig( 
+            width=32, depth=2, mlp_dim=64, num_heads=4, num_kv_heads=1, head_dim=8,
+            vocab_size=257_152,
+        ),
     }
     return variants[variant]
 

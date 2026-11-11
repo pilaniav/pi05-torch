@@ -22,5 +22,10 @@ def get_siglip_config(variant: str) -> SiglipConfig:
         "siglip_tiny": SiglipConfig(
             image_size=28, patch_size=14, width=24, depth=2, mlp_dim=48, num_heads=4
         ),
+        
+         # tiny, but real 224 images fit (dev runs)
+        "siglip_tiny_224": SiglipConfig( 
+            image_size=224, patch_size=14, width=24, depth=2, mlp_dim=48, num_heads=4,
+        ),
     }
     return variants[variant]

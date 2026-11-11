@@ -44,11 +44,11 @@ import av
 import pyarrow.parquet as pq
 import torch
 import tyro
-from PIL import Image
 from torchcodec.decoders import VideoDecoder
 
 from pi05.data_pipeline.download import MANIFEST_FILE, read_jsonl
 from pi05.data_pipeline.norm_stats import write_norm_stats
+from pi05.data_pipeline.transforms import resize_image
 
 logger = logging.getLogger(__name__)
 
@@ -99,9 +99,10 @@ def reencode_video(
         for frame in source.decode(source_stream):
             if frame.width != frame.height:
                 raise ValueError(f"{src}: expected square frames, got {frame.width}x{frame.height}")
-            image = frame.to_image().resize((size, size), Image.BILINEAR)  # as openpi
+            pixels = resize_image(frame.to_ndarray(format="rgb24"), size)
 
-            new_frame = av.VideoFrame.from_image(image)
+            new_frame = av.VideoFrame.from_ndarray(pixels, format="rgb24")
+
             new_frame.pts = num_frames  # frame number = timestamp in units of 1/FPS s
             new_frame.time_base = Fraction(1, FPS)
             for packet in target_stream.encode(new_frame):

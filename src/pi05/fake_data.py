@@ -16,9 +16,12 @@ NUM_CAMERAS = 3
 
 def fake_batches(
     model_config: Pi05Config, batch_size: int, seed: int
-) -> Iterator[tuple[Observation, torch.Tensor]]:
+) -> Iterator[tuple[Observation, torch.Tensor, torch.Tensor]]:
     """
-    Endless random (obs, actions) batches. TODO: replace with the real loader.
+    Endless random (obs, actions, action_mask) batches, shaped like the real loader's.
+
+    For tests and the debug config: no files needed. action_mask is all True
+    (fake episodes never end).
     """
     generator = torch.Generator().manual_seed(seed)
     image_size = get_siglip_config(model_config.vision_variant).image_size
@@ -29,10 +32,11 @@ def fake_batches(
     while True:
         images = torch.rand(B, NUM_CAMERAS, 3, image_size, image_size, generator=generator)
         obs = Observation(
-            images=images * 2 - 1, # [-1, 1]
+            images=images * 2 - 1,  # [-1, 1]
             image_masks=torch.ones(B, NUM_CAMERAS, dtype=torch.bool),
             prompt_ids=torch.randint(0, vocab_size, (B, L), generator=generator),
-            prompt_mask=torch.ones(B, L, dtype=torch.bool)
+            prompt_mask=torch.ones(B, L, dtype=torch.bool),
         )
         actions = torch.randn(B, H, D, generator=generator)
-        yield obs, actions
+        action_mask = torch.ones(B, H, dtype=torch.bool)
+        yield obs, actions, action_mask
