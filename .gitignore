@@ -10,8 +10,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Claude Code per-user settings
-.claude/settings.local.json
+# Claude Code (local instructions and settings, not published)
+CLAUDE.md
+.claude/
 
 # Editor settings (personal)
 .vscode/
