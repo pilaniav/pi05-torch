@@ -10,6 +10,7 @@ All commands run from the repo root.
 
 ## 2. Python environment
 
+    curl -LsSf https://astral.sh/uv/install.sh | sh    # install uv (once per machine)
     uv sync                      # installs pyproject.toml deps, exact versions from uv.lock
 
 - torchcodec >= 0.12 requires torch >= 2.11 (pinned in pyproject.toml).
@@ -17,13 +18,16 @@ All commands run from the repo root.
 
 Check:
 
-    python -c "import av; print('libx264' in av.codecs_available)"     # True
-    python -c "from torchcodec.decoders import VideoDecoder; print('ok')"
+    uv run python -c "import av; print('libx264' in av.codecs_available)"     # True
+    uv run python -c "from torchcodec.decoders import VideoDecoder; print('ok')"
 
 
 ## 3. Accounts
 
     huggingface-cli login        # higher download rate limits; needed if a dataset is gated
+
+    git clone https://github.com/pilaniav/pi05-torch.git
+    cd pi05-torch
 
 
 ## 4. Folder layout and key files
@@ -42,6 +46,7 @@ Relative to the repo root.
     tests/unit/              unit tests
     docs/setup.md            this file
     pyproject.toml, uv.lock  dependencies (exact versions in uv.lock)
+    README.md, LICENSE       overview, Apache-2.0 license
     CLAUDE.md                instructions for Claude Code
 
 ### Data and outputs (gitignored)
@@ -108,8 +113,8 @@ Set up the instance:
 
 Smoke run on one GPU first:
 - load_pretrained loads the weights with no errors.
-- Real model at batch 32 / world_size: peak GPU memory, sec/step, compile on vs off.
-- Overfit one batch: loss -> ~0 within a few hundred steps.
+- Peak GPU memory (mem in the log line) and sec/step; compile on vs off (--compile).
+- Overfit one batch (--overfit-one-batch): loss falls well below the normal training loss.
 - Save + resume a checkpoint; check disk per checkpoint (~40 GB).
 
 Habits:
@@ -119,6 +124,15 @@ Habits:
 
 
 ## 7. Quick start
+
+Precaution for laptops without a usable NVIDIA GPU: hide the GPU from torch with
+`CUDA_VISIBLE_DEVICES=` (empty value = no GPUs visible, so everything runs on CPU).
+Otherwise the CUDA build of torch fails to start (error 804), and data loader workers
+can abort when they exit.
+
+    CUDA_VISIBLE_DEVICES= uv run python -m pi05.train dev    # for one command
+    echo 'export CUDA_VISIBLE_DEVICES=' >> ~/.bashrc         # for every terminal
+
 
 Small local test on a laptop (CPU, a few minutes):
 
