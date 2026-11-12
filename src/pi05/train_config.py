@@ -37,6 +37,7 @@ class TrainConfig:
     num_workers: int = 4  # data loader worker processes per GPU
     val_interval: int = 1000  # steps between validation losses; 0 = off
     num_val_batches: int = 10  # fixed validation batches, built once at start
+    overfit_one_batch: bool = False  # debug: train on the first batch only (loss should -> ~0)
 
     @property
     def checkpoint_dir(self) -> Path:

@@ -1,6 +1,7 @@
 """
 Training: LR schedule, optimizer, train step, loop, entry point.
 """
+import itertools
 import logging
 import math
 import random
@@ -164,7 +165,7 @@ def train_loop(
     val_batches: list | None = None,  # rank 0 only; None = no validation
 ) -> Pi05:
     """
-    Train for config.num_train_steps. data yields per-rank (obs, actions) batches.
+    Train for config.num_train_steps. data yields per-rank (obs, actions, action_mask) batches.
     """
     set_seed(config.seed + info.rank)
     model = Pi05(config.model_config)
@@ -223,13 +224,17 @@ def train_loop(
                 dist.all_reduce(loss_sum)  # sum over ranks
             
             if info.is_main:
+                gpu_mem_gb = 0.0  # stays 0 on CPU
+                if info.device.type == "cuda":
+                    gpu_mem_gb = torch.cuda.max_memory_allocated(info.device) / 1e9
                 logger.info(
-                    "step %d  loss %.4f  grad_norm %.3f  lr %.2e  %.2fs/step",
+                    "step %d  loss %.4f  grad_norm %.3f  lr %.2e  %.2fs/step  mem %.1fGB",
                     done,
                     loss_sum.item() / (config.log_interval * info.world_size),
                     metrics["grad_norm"].item(),
                     metrics["lr"].item(),
                     (time.time() - interval_start) / config.log_interval,
+                    gpu_mem_gb,
                 )
 
             loss_sum.zero_()
@@ -306,6 +311,11 @@ def main() -> None:
                 val_dataset, config.num_val_batches, batch_size, seed=config.seed
             )
 
+    if config.overfit_one_batch:
+        one_batch = next(data)
+        data.close()  # stop the loader's workers: only this one batch is needed
+        data = itertools.repeat(one_batch)  # the same batch forever
+    
     try:
         train_loop(config, data, info, val_batches)
     finally:
