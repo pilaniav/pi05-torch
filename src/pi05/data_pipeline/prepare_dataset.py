@@ -80,6 +80,10 @@ def reencode_video(
     """
     with av.open(str(src)) as source, av.open(str(dst), mode="w") as target:
         source_stream = source.streams.video[0]
+        # TODO: limit threads per worker (source_stream.thread_count = 2 and threads=2 in
+        # x264-params). FFmpeg and x264 size their thread pools from the detected CPU count,
+        # which in a container can be the whole host (e.g. 256 instead of 32 rented): with
+        # many workers, thousands of threads compete for the cores. Measure prepare time first.
         source_stream.thread_type = "AUTO"  # decode with several threads
 
         target_stream = target.add_stream("libx264", rate=FPS)
