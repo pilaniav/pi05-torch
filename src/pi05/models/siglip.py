@@ -18,7 +18,7 @@ class SiglipVision(nn.Module):
             patch_size=config.patch_size,
             hidden_size=config.width,
             num_hidden_layers=config.depth,
-            intermediate_size=config.depth,
+            intermediate_size=config.mlp_dim,
             num_attention_heads=config.num_heads,
             layer_norm_eps=config.layer_norm_eps,
             hidden_act="gelu_pytorch_tanh",          # set explicitly, not left to library defaults
