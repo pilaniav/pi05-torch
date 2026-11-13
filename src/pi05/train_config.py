@@ -93,6 +93,7 @@ TRAIN_CONFIGS = {
         save_interval=1_000,
         val_interval=1_000,
         num_val_batches=10,
+        compile=True,  # measured on A100: 0.58 vs 0.80 s/step, ~4 min to compile at start
     ),
 }
 
