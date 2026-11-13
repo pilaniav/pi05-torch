@@ -158,3 +158,4 @@ def load_checkpoint(
     safetensors.torch.load_model(model, str(step_dir / "model.safetensors"), device=str(device))
     optimizer_state = torch.load(step_dir / "optimizer.pt", map_location=device)
     optimizer.load_state_dict(optimizer_state)
+    logger.info("Loaded checkpoint %s", step_dir)

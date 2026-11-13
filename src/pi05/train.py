@@ -197,6 +197,7 @@ def train_loop(
     if has_checkpoints:
         load_checkpoint(config.checkpoint_dir, saved_step, model, optimizer, info.device)
         start_step = saved_step
+        logger.info("Resuming from step %d", start_step)
 
     ddp_model = model
     if info.world_size > 1:
