@@ -189,7 +189,7 @@ def train_loop(
     if saved_step is not None:
         if not config.resume:
             raise FileExistsError(
-                f"{config.checkpoint_dir} has checkpoints: set resume=True or use a new exp_name"
+                f"{config.checkpoint_dir} has checkpoints: pass --resume, or use a new --exp-name"
             )
         load_checkpoint(config.checkpoint_dir, saved_step, model, optimizer, info.device)
         start_step = saved_step
@@ -197,7 +197,11 @@ def train_loop(
     ddp_model = model
     if info.world_size > 1:
         device_ids = [info.local_rank] if info.device.type == "cuda" else None
-        ddp_model = DistributedDataParallel(model, device_ids=device_ids)
+        ddp_model = DistributedDataParallel(
+            model,
+            device_ids=device_ids,
+            gradient_as_bucket_view=True,  # grads live in DDP's buffers: saves one full copy (~13 GB)
+        )
 
     if config.compile:
         ddp_model = torch.compile(ddp_model)
