@@ -168,9 +168,18 @@ def train_loop(
     Train for config.num_train_steps. data yields per-rank (obs, actions, action_mask) batches.
     """
     set_seed(config.seed + info.rank)
+
+    saved_step = latest_step(config.checkpoint_dir)  # None for a new run
+    has_checkpoints = saved_step is not None
+    if has_checkpoints and not config.resume:
+        raise FileExistsError(
+            f"{config.checkpoint_dir} has checkpoints: pass --resume, or use a new --exp-name"
+        )
+
     model = Pi05(config.model_config)
 
-    if config.pretrained_path is not None:
+    # A resumed run gets its weights from its own checkpoint (below), so skip the pretrained ones.
+    if config.pretrained_path is not None and not has_checkpoints:
         load_pretrained(model, config.pretrained_path)
     
     freeze_unused_params(model)
@@ -185,12 +194,7 @@ def train_loop(
     optimizer = make_optimizer(model, config)
 
     start_step = 0
-    saved_step = latest_step(config.checkpoint_dir)
-    if saved_step is not None:
-        if not config.resume:
-            raise FileExistsError(
-                f"{config.checkpoint_dir} has checkpoints: pass --resume, or use a new --exp-name"
-            )
+    if has_checkpoints:
         load_checkpoint(config.checkpoint_dir, saved_step, model, optimizer, info.device)
         start_step = saved_step
 
