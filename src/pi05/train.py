@@ -258,10 +258,9 @@ def train_loop(
             val_loss = validation_loss(model, val_batches, info.device, config)
             logger.info("step %d  val_loss %.4f", done, val_loss)
 
-            # TODO (research stage): keep the best checkpoint by val_loss (weights only, e.g.
-            # checkpoint_dir/best/). Needed if val_loss rises late in a run (overfitting):
-            # pruning keeps only the last keep_last_checkpoints, so the best one may be gone.
-            # Until then, val_loss is in train.log; raise keep_last_checkpoints if needed.
+            # TODO: keep periodic checkpoints (openpi's keep_period, e.g. every 10k steps,
+            # weights only) so several can be evaluated in sim and picked by success rate.
+            # Val loss is too noisy here to pick a "best" checkpoint by it.
 
         if info.is_main and (done % config.save_interval == 0 or done == config.num_train_steps):
             save_checkpoint(
