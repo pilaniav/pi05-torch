@@ -215,6 +215,11 @@ def train_loop(
     if config.dataset_dir is not None:
         checkpoint_extras = (config.dataset_dir / NORM_STATS_FILE,)  # needed at inference
 
+    if val_batches and config.val_interval > 0 and start_step == 0:
+        # Baseline: loss of the starting weights (e.g. pretrained) before any training.
+        val_loss = validation_loss(model, val_batches, info.device, config)
+        logger.info("step 0  val_loss %.4f", val_loss)
+
     loss_sum = torch.tensor(0.0, device=info.device)
     interval_start = time.time()
 
