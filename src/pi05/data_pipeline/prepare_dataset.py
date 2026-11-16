@@ -54,6 +54,10 @@ logger = logging.getLogger(__name__)
 
 
 FPS = 30
+# Threads per video for decoding and for encoding. FFmpeg and x264 otherwise size their
+# thread pools from the CPU count they detect, which in a container can be the whole
+# host rather than our rented share. Parallelism comes from num_workers instead.
+CODEC_THREADS = 2
 
 
 @dataclass(frozen=True)
@@ -80,11 +84,8 @@ def reencode_video(
     """
     with av.open(str(src)) as source, av.open(str(dst), mode="w") as target:
         source_stream = source.streams.video[0]
-        # TODO: limit threads per worker (source_stream.thread_count = 2 and threads=2 in
-        # x264-params). FFmpeg and x264 size their thread pools from the detected CPU count,
-        # which in a container can be the whole host (e.g. 256 instead of 32 rented): with
-        # many workers, thousands of threads compete for the cores. Measure prepare time first.
-        source_stream.thread_type = "AUTO"  # decode with several threads
+        source_stream.thread_type = "AUTO"
+        source_stream.thread_count = CODEC_THREADS
 
         target_stream = target.add_stream("libx264", rate=FPS)
         target_stream.width = size
@@ -95,7 +96,7 @@ def reencode_video(
             # keyframe exactly every N frames, no extra ones at scene cuts, no B-frames
             "x264-params": (
                 f"keyint={keyframe_interval}:min-keyint={keyframe_interval}"
-                ":scenecut=0:bframes=0"
+                f":scenecut=0:bframes=0:threads={CODEC_THREADS}"
             ),
         }
 
