@@ -50,7 +50,8 @@ def openpi_to_ours(key: str) -> str | None:
 
 def load_pretrained(model: torch.nn.Module, path: Path) -> None:
     """
-    Load openpi's PyTorch pi0.5 weights (model.safetensors) into our model.
+    Load weights only (model.safetensors) into our model: either openpi/LeRobot
+    pi0.5 weights (renamed with openpi_to_ours) or our own checkpoint (names as-is).
 
     Strict: every key must map to one of our params with the same shape, and every
     param must be loaded. Reads one tensor at a time to keep CPU memory low.
@@ -59,13 +60,15 @@ def load_pretrained(model: torch.nn.Module, path: Path) -> None:
     loaded = set()
 
     with safe_open(str(path), framework="pt") as f:
-        for openpi_key in f.keys():
-            our_key = openpi_to_ours(openpi_key)
+        for file_key in f.keys():
+            # Our own checkpoint keys are used as-is; anything else is an openpi name.
+            our_key = file_key if file_key in params else openpi_to_ours(file_key)
+
             if our_key is None:
                 continue
             if our_key not in params:
-                raise KeyError(f"{openpi_key} -> {our_key}: no such parameter in our model")
-            tensor = f.get_tensor(openpi_key)
+                raise KeyError(f"{file_key} -> {our_key}: no such parameter in our model")
+            tensor = f.get_tensor(file_key)
             if tensor.shape != params[our_key].shape:
                 raise ValueError(
                     f"{our_key}: shape {tuple(tensor.shape)} != {tuple(params[our_key].shape)}"
