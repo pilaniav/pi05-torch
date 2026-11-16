@@ -45,7 +45,9 @@ def setup_distributed() -> DistInfo:
 
     if world_size > 1:
         backend = "nccl" if device.type == "cuda" else "gloo"
-        dist.init_process_group(backend=backend, timeout=DIST_TIMEOUT)
+        # Bind the group to this rank's GPU so NCCL never has to guess it (e.g. in barrier).
+        device_id = device if device.type == "cuda" else None
+        dist.init_process_group(backend=backend, timeout=DIST_TIMEOUT, device_id=device_id)
 
     return DistInfo(rank, local_rank, world_size, device)
 
