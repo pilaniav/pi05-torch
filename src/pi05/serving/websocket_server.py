@@ -16,6 +16,7 @@ import http
 import logging
 import time
 import traceback
+from pathlib import Path
 
 import msgpack
 import numpy as np
@@ -24,6 +25,8 @@ from websockets.exceptions import ConnectionClosed
 from websockets.frames import CloseCode
 
 logger = logging.getLogger(__name__)
+
+LOG_EVERY = 100  # log inference time once per this many actions
 
 
 def pack_array(obj):
@@ -74,11 +77,19 @@ class WebsocketPolicyServer:
     Serves a policy with act(obs) -> action and reset() (e.g. B1KPolicy).
     """
 
-    def __init__(self, policy, host: str = "0.0.0.0", port: int = 8000, metadata: dict | None = None):
+    def __init__(
+        self,
+        policy,
+        host: str = "0.0.0.0",
+        port: int = 8000,
+        metadata: dict | None = None,
+        save_obs_path: Path | None = None,
+    ):
         self.policy = policy
         self.host = host
         self.port = port
         self.metadata = metadata or {}
+        self.save_obs_path = save_obs_path  # save the first observation received, then None
 
     def serve_forever(self) -> None:
         asyncio.run(self._run())
@@ -102,6 +113,7 @@ class WebsocketPolicyServer:
         logger.info("Client connected from %s", connection.remote_address)
         await connection.send(packb(self.metadata))
 
+        infer_times = []  # ms per action since the last log line
         while True:
             try:
                 obs = unpackb(await connection.recv())
@@ -109,11 +121,25 @@ class WebsocketPolicyServer:
                     self.policy.reset()
                     continue  # no reply: the client does not read one
 
+                if self.save_obs_path is not None:
+                    self._save_obs(obs)
+                
                 start = time.monotonic()
                 # Blocks the event loop while the model runs: fine, the eval is one client.
                 action = self.policy.act(obs)
                 infer_ms = (time.monotonic() - start) * 1000
                 await connection.send(packb({"action": action, "server_timing": {"infer_ms": infer_ms}}))
+
+                infer_times.append(infer_ms)
+                if len(infer_times) == LOG_EVERY:
+                    logger.info(
+                        "infer_ms over the last %d actions: mean %.1f, max %.1f",
+                        LOG_EVERY,
+                        np.mean(infer_times),
+                        np.max(infer_times),
+                    )
+                    infer_times = []
+
             except ConnectionClosed:
                 logger.info("Client %s disconnected", connection.remote_address)
                 break
@@ -124,3 +150,12 @@ class WebsocketPolicyServer:
                 await connection.send(traceback.format_exc())
                 await connection.close(code=CloseCode.INTERNAL_ERROR, reason="Internal server error")
                 break
+
+    def _save_obs(self, obs: dict) -> None:
+        """
+        Save the first real observation (for tests and offline checks), only once.
+        """
+        self.save_obs_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(self.save_obs_path, **obs)
+        logger.info("Saved observation to %s", self.save_obs_path)
+        self.save_obs_path = None

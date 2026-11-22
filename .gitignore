@@ -26,4 +26,5 @@ CLAUDE.md
 /pretrained/
 /checkpoints/
 /train_results/
+/eval_results/
 /wandb/

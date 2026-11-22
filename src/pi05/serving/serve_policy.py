@@ -39,6 +39,8 @@ class ServeConfig:
     ensemble_size: int = 10  # temporal_ensemble: chunks averaged
     replan_steps: int = 10  # receding_horizon: actions executed per model call
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    results_dir: Path = Path("eval_results")  # eval outputs live here, like train_results
+    save_obs: bool = False  # save the first observation to results_dir/<task>_obs.npz
 
 
 def find_task_prompt(tasks_file: Path, task_name: str) -> str:
@@ -76,7 +78,13 @@ def main(config: ServeConfig) -> None:
         ensemble_size=config.ensemble_size,
         replan_steps=config.replan_steps,
     )
-    server = WebsocketPolicyServer(wrapper, host=config.host, port=config.port)
+
+    save_obs_path = None
+    if config.save_obs:
+        save_obs_path = config.results_dir / f"{config.task_name}_obs.npz"
+    server = WebsocketPolicyServer(
+        wrapper, host=config.host, port=config.port, save_obs_path=save_obs_path
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:  # Ctrl-C: normal way to stop the server
