@@ -39,6 +39,12 @@ configurations let the whole pipeline, from data to training, run on a CPU lapto
 - Atomic checkpoints, resume, pruning of old checkpoints; validation loss on fixed batches
 - Training curves plotted from the log
 
+**Serving and evaluation**
+- Websocket policy server that speaks BEHAVIOR-1K's eval protocol, so the official
+  eval script runs unchanged against it
+- Action chunks executed with a temporal ensemble (BEHAVIOR's default) or receding horizon
+- bf16 inference: ~7.4 GB of GPU memory, ~225 ms per model call on an RTX 4090
+
 **Testing**
 - Unit tests that run on CPU with tiny model sizes
 
@@ -67,6 +73,16 @@ Validation loss improved mostly in the first ~4k steps and stayed nearly flat
 afterwards, while training loss kept falling. Task success in simulation is the
 real measure and will be reported once evaluation is in place.
 
+**Evaluation pilot** (BEHAVIOR-1K's eval, one test instance of turning_on_radio)
+
+| Item                | Value                                        |
+|---------------------|----------------------------------------------|
+| Setup               | 2x RTX 4090: policy server + simulator       |
+| Model call          | ~225 ms (bf16, temporal ensemble)            |
+| Simulator step      | ~0.30 s, model included                      |
+| GPU memory          | ~7.4 GB server, ~13.8 GB simulator           |
+| Status              | pipeline validated end to end; full evaluation in progress |
+
 ## Getting started
 
 See [docs/setup.md](docs/setup.md) for setup, data preparation and training.
@@ -76,10 +92,11 @@ See [docs/setup.md](docs/setup.md) for setup, data preparation and training.
 The next steps are in progress; the extensions will follow as time allows.
 
 **Next**
-1. Policy server: serve the trained model over openpi's websocket protocol
+1. Policy server: serve the trained model over BEHAVIOR's websocket protocol (done)
 2. Evaluation: run BEHAVIOR-1K's evaluation in simulation through the policy server,
    using a ready-to-use Docker image (BEHAVIOR-1K 2025 code, Isaac Sim, WebRTC
    viewing) for any machine with an NVIDIA RTX GPU, local or rented
+   (in progress: pilot run done)
 3. RL fine-tuning: one algorithm in depth, with new reward modeling that rewards task
    success while penalizing unnecessary base and arm motion
 
