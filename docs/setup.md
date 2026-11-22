@@ -234,7 +234,205 @@ Check the weights arrived intact; both hashes must match:
 
 Then destroy the instance (stopping it still bills for storage).
 
-## 4. Folder layout and key files
+## 4. Serving and evaluation
+
+### 4.1 Model input and output
+
+What the model sees and returns at inference (robot: BEHAVIOR's R1Pro). Training uses
+the same processing, plus augmentation.
+
+**Inputs**
+
+| Input   | Format                                                                        |
+|---------|-------------------------------------------------------------------------------|
+| Images  | 3 cameras, in this order: head, left wrist, right wrist; 224x224 RGB uint8   |
+|         | (the eval sends RGBA; alpha is dropped), scaled to [-1, 1]                    |
+| State   | 23 dims taken from BEHAVIOR's 256-dim proprioception (order below)            |
+| Prompt  | the task's text, e.g. "Turn on the radio receiver that's on the table in     |
+|         | the living room."                                                             |
+
+State order (23 dims):
+
+    base velocity 3 | torso 4 | arm L 7 | arm R 7 | gripper L 1 | gripper R 1
+
+- Gripper value = opening width, the sum of its two finger joints.
+- The state is normalized with the training run's norm stats (q01 -> -1, q99 -> +1),
+  split into 256 bins, and written into the prompt (no separate state input):
+
+      Task: {task text}, State: {bins};\nAction:
+
+  tokenized with the PaliGemma tokenizer (at most 200 tokens).
+
+**Output**
+
+An action chunk of 50 steps x 23 dims (the model's 32 dims, minus padding),
+unnormalized with the training run's norm stats: absolute joint targets, with the base
+as a velocity and each gripper as a continuous opening width.
+
+Action order (23 dims, index ranges):
+
+    base 0-2 | torso 3-6 | arm L 7-13 | gripper L 14 | arm R 15-21 | gripper R 22
+
+- Same order as the dataset's action column and BEHAVIOR's R1Pro action space.
+- It differs from the state order: in the state, both arms come before both grippers.
+- One chunk covers 50 steps at 30 Hz (~1.7 s); the server returns one action per
+  eval step (4.2).
+
+### 4.2 Policy server
+
+Serves a trained checkpoint to BEHAVIOR's eval over a websocket, using the eval's own
+protocol. It runs in this repo's environment; the eval runs in BEHAVIOR's (4.3).
+
+    uv run python -m pi05.serving.serve_policy \
+        --checkpoint-dir train_results/<exp-name>/<step> \
+        --tasks-file train_results/<exp-name>/data/meta/tasks.jsonl \
+        --task-name turning_on_radio
+
+- `--checkpoint-dir`: model.safetensors + the training run's norm_stats.json.
+- `--tasks-file`: maps the task name to the exact prompt used in training.
+- One server serves one task: the eval sends no prompt, so it is fixed at startup.
+
+| Flag            | Default             | Meaning                                         |
+|-----------------|---------------------|-------------------------------------------------|
+| `--port`        | 8000                | the eval connects here                          |
+| `--mode`        | `temporal_ensemble` | model called every step; the step's actions from the last 10 chunks are averaged (grippers from the newest) |
+|                 | `receding_horizon`  | model called every `--replan-steps` (10) steps; ~10x fewer calls |
+| `--save-obs`    | off                 | save the first observation received to `--results-dir` (default eval_results/) |
+| `--device`      | cuda if available   | weights in bf16 on GPU, float32 on CPU          |
+
+Protocol, as BEHAVIOR's client expects it: `GET /healthz` answers 200; on connect the
+server sends metadata ({}); `{"reset": True}` resets the chunk history without a reply;
+each observation gets `{"action": (1, 23)}` back; messages are msgpack with numpy arrays.
+
+Log lines to expect:
+
+    Loaded <checkpoint> on cuda (torch.bfloat16)
+    Serving on ws://0.0.0.0:8000
+    Client connected from (...)
+    infer_ms over the last 100 actions: mean 225.3, max 238.2
+
+Measured on an RTX 4090: ~7.4 GB of GPU memory, ~225 ms per model call (`temporal_ensemble`).
+Stop with Ctrl-C.
+
+To check a checkpoint without a GPU, run the same command with `CUDA_VISIBLE_DEVICES=`:
+it loads in about a minute on CPU (needs ~14 GB of RAM) and serves, slowly.
+
+### 4.3 BEHAVIOR eval
+
+BEHAVIOR's own eval script drives the policy server: it runs the simulator, sends
+observations, executes the returned actions and writes metrics. Nothing in BEHAVIOR's
+code is changed.
+
+**Machine**
+
+- An NVIDIA **RTX** GPU: the simulator (Isaac Sim) needs RT cores; A100/H100 can't run it.
+- 2x RTX 4090 (24 GB): one for the server (~7.4 GB), one for the simulator (~13.8 GB).
+  Both on one 24 GB card do not fit reliably.
+- Driver **580.x (CUDA 13.0)**. Newer drivers (600+) crash Isaac Sim 4.5's renderer;
+  older ones (570.x, CUDA 12.8) are too old for this repo's torch build.
+
+**Software**
+
+- BEHAVIOR-1K (2025 challenge version, Isaac Sim 4.5) in its own environment
+  (e.g. conda `behavior`), with its data: `./setup.sh --dataset` in BEHAVIOR-1K.
+- This repo, set up as in section 1, with the tokenizer (2.1).
+- The checkpoint. Uploading 13 GB from home is slow; push it once to a private
+  Hugging Face repo (from a rented machine it takes minutes), then download it anywhere:
+
+      uv run hf upload <hf-user>/<repo> train_results/<exp-name>/<step> . --private
+      uv run hf download <hf-user>/<repo> --local-dir train_results/<exp-name>/<step>
+
+**Run (two terminals)**
+
+Terminal 1, this repo, server on GPU 0:
+
+    RUN=$PWD/eval_results/<run-name> && mkdir -p $RUN
+    CUDA_VISIBLE_DEVICES=0 uv run python -m pi05.serving.serve_policy \
+        --checkpoint-dir train_results/<exp-name>/<step> \
+        --tasks-file train_results/<exp-name>/data/meta/tasks.jsonl \
+        --task-name turning_on_radio 2>&1 | tee $RUN/server.log
+
+Terminal 2, BEHAVIOR-1K root and environment, simulator on GPU 1, once the server
+prints "Serving on ...":
+
+    RUN=/absolute/path/to/pi05-torch/eval_results/<run-name>
+    unset CUDA_VISIBLE_DEVICES
+    export OMNIGIBSON_HEADLESS=1 OMNIGIBSON_GPU_ID=1
+    python OmniGibson/omnigibson/learning/eval.py policy=websocket \
+        task.name=turning_on_radio log_path=$RUN 2>&1 | tee $RUN/eval.log
+
+- Select the simulator's GPU with `OMNIGIBSON_GPU_ID`, never `CUDA_VISIBLE_DEVICES`:
+  Isaac Sim renders through Vulkan, and the mismatch with CUDA's device numbering
+  crashes it.
+- `log_path` must be absolute: eval.py runs from the BEHAVIOR-1K folder.
+- If the environment sets `OMNIGIBSON_REMOTE_STREAMING`, the simulator streams to
+  http://localhost:8211 (forward that port).
+
+| Eval option                    | Meaning                                                 |
+|--------------------------------|---------------------------------------------------------|
+| `task.name=...`                | the task (must match the server's `--task-name`)        |
+| `'eval_instance_ids=[0,1]'`    | a subset of the 10 test instances (default: all)        |
+| `eval_on_train_instances=true` | use the demos' starting states instead                  |
+| `model.port=8001`              | the server's port (default 8000)                        |
+| `write_video=false`            | skip videos                                             |
+| `max_steps=...`                | time limit (default: 2x the mean human demo length)     |
+
+**Task instances**
+
+Each task has 10 official test instances (positions 0-9 of the 20 listed per task in
+BEHAVIOR's `test_instances.csv`). Their starting states are not among the training
+demos. One rollout each; an episode ends on success or at the time limit
+(e.g. 4300 steps, ~2.4 min of sim time, for turning_on_radio).
+
+**Outputs** (in `$RUN`)
+
+    metrics/<task>_<instance>_0.json   q_score (final: 1.0 = success, else partial
+                                       credit), time, base and arm distances
+    videos/<task>_<instance>_0.mp4     head and wrist cameras
+    server.log, eval.log
+
+Aggregate results from the json files: the success rate printed at the end of eval.log
+covers only the last episode.
+
+**Timing** (2x RTX 4090, `temporal_ensemble`): ~0.30 s per simulator step (~225 ms of
+it is the model), so ~21 min for a turning_on_radio instance that runs to the time limit.
+
+### 4.4 Several tasks
+
+Each eval run covers one task, and each server serves one task, so several tasks
+means one (server, eval) pair per task. BEHAVIOR ships no multi-task runner.
+
+**One after the other** (one pair of GPUs): for each task, start the server with
+`--task-name <task>`, run the eval with `task.name=<task>`, then stop the server.
+Use the same task name on both sides: a mismatch is not detected, the model just
+gets the wrong prompt.
+
+**In parallel**: one pair per task (or per subset of instances), each with its own port,
+and never two evals on one server (the chunk history is per server):
+
+    serve_policy ... --task-name turning_on_radio --port 8000
+    serve_policy ... --task-name picking_up_trash --port 8001
+
+    eval.py ... task.name=turning_on_radio model.port=8000 log_path=$RUN
+    eval.py ... task.name=picking_up_trash model.port=8001 log_path=$RUN
+
+Runs can share one `log_path`: file names include the task and instance.
+
+**Loop pattern** (a sketch, not a tested script):
+
+    for TASK in turning_on_radio picking_up_trash; do
+        uv run python -m pi05.serving.serve_policy ... --task-name $TASK --port 8000 &
+        SERVER_PID=$!
+        until curl -sf localhost:8000/healthz; do sleep 5; done   # wait for the model
+        <BEHAVIOR python> OmniGibson/omnigibson/learning/eval.py policy=websocket \
+            task.name=$TASK log_path=$RUN
+        kill $SERVER_PID
+    done
+
+Restarting the server per task costs about a minute (model loading), small next to the
+eval itself.
+
+## 5. Folder layout and key files
 
 Relative to the repo root. Files marked `*` are entry points: the scripts you run
 (`uv run python -m pi05.<module>`). Start reading the code from them; everything
@@ -261,6 +459,11 @@ else is called from there.
       * norm_stats.py              quantile statistics over the train split
         transforms.py              normalization, prompt tokenizer, image augmentation
         dataset.py                 dataset, data loader, validation batches
+      serving/                   trained model -> BEHAVIOR eval
+      * serve_policy.py            policy server entry point: CLI, task prompt, starts the server
+        policy.py                  Policy (inputs -> action chunk) and B1KPolicy (BEHAVIOR keys,
+                                   temporal ensemble or receding horizon, one action per call)
+        websocket_server.py        BEHAVIOR's websocket protocol (/healthz, reset, act), msgpack
     * train.py                   training entry point (single GPU or torchrun)
       train_config.py            training configs: debug, dev, pi05_b1k
       checkpoint.py              save/resume checkpoints, load pretrained weights
@@ -283,3 +486,5 @@ else is called from there.
       <step>/                    model.safetensors, optimizer.pt,
                                  metadata.json, norm_stats.json
     train_results/<exp_name>/    results copied off a rented instance     <- rsync (3.6)
+    eval_results/<run-name>/     eval metrics (json), videos, server and  <- eval (4.3)
+                                 eval logs, saved observation
