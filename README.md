@@ -109,9 +109,12 @@ The next steps are in progress; the extensions will follow as time allows.
   during training (4 x A100, DDP).
 - Profiling a training step: profile a few steps with torch.profiler to see where each
   step's time goes (forward, backward, gradient all-reduce, optimizer, data loading).
-- Reusing a run's norm stats when training starts from its weights
+- Reusing a run's norm stats when training starts from its weights.
+- Knowledge Insulation for fine-tuning: detach the VLM's keys/values on the action expert's
+  path, so the flow-matching loss trains only the action expert, and train the VLM with a
+  discrete FAST action-token loss instead
 - Scaling to the BEHAVIOR 2026 challenge data (100 tasks, 20,000 demos, ~1,950 h;
-  LeRobot v3 format, so download and preparation need adapting)
+  LeRobot v3 format, so download and preparation need adapting).
 
 ## License
 
